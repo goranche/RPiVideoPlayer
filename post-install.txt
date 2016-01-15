@@ -1,0 +1,72 @@
+################################################
+### Various system cleanup / settings
+
+# Packages should've been installed by installer-config.txt, but still...
+
+# Remove the tiny sh*t vim
+chroot /rootfs apt-get -y install vim
+chroot /rootfs apt-get -y purge vim-tiny
+
+# Let's comment out the LC_* variables from SSHd
+sed -i 's/^\(AcceptEnv.*LC_.*\)$/# \1/' /rootfs/etc/ssh/sshd_config
+
+# Add avahi-daemon and make sure it runs
+chroot /rootfs apt-get -y install avahi-daemon
+sed -i 's/AVAHI_DAEMON_DETECT_LOCAL=1/AVAHI_DAEMON_DETECT_LOCAL=0/' /rootfs/etc/default/avahi-daemon
+
+# Set my actual timezone
+TIMEZONE="Europe/Ljubljana"
+echo $TIMEZONE > /rootfs/etc/timezone
+chroot /rootfs dpkg-reconfigure -f noninteractive tzdata
+
+# Disable root login and password
+sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /rootfs/etc/ssh/sshd_config
+chroot /rootfs passwd -d root
+
+# We'll be playing video, so some memory is needed for the GPU
+echo "gpu_mem=64" >> /rootfs/boot/config.txt
+
+################################################
+### Add sudo support and create my (goranb) user
+### Should be removed, I guess
+chroot /rootfs apt-get -y install sudo
+chroot /rootfs useradd -s /bin/bash -p saltedpasshash -m -G sudo username
+mkdir -m 700 /rootfs/home/username/.ssh
+echo "ForwardAgent yes" > /rootfs/home/username/.ssh/config
+echo "public SSH key file content" > /rootfs/home/username/.ssh/authorized_keys
+chroot /rootfs chown -R username:username /home/username/.ssh
+
+################################################
+### Make the system read-only
+
+# Install busybox-syslogd, remove rsyslog
+# do *NOT* add busybox-syslogd to packages list
+# in installer-config.txt, as this will cause
+# cdebootstrap to fail with a very cryptic message
+chroot /rootfs apt-get -y install busybox-syslogd
+chroot /rootfs dpkg --purge rsyslog
+
+# Remove fake-hwclock as it can't store the time anyway
+chroot /rootfs dpkg --purge fake-hwclock
+
+# Remove "write" dirs and link them to /tmp
+rm -rf /rootfs/var/lib/dhcp
+ln -s /tmp /rootfs/var/lib/dhcp
+
+rm -rf /rootfs/var/run
+ln -s /tmp /rootfs/var/run
+
+rm -rf /rootfs/var/spool
+ln -s /tmp /rootfs/var/spool
+
+rm -rf /rootfs/var/lock
+ln -s /tmp /rootfs/var/lock
+
+chroot /rootfs insserv -r bootlogs
+
+# Add "fastboot noswap ro" to end of cmdline.txt
+# Could be more robust, works for now
+echo -n " fastboot noswap ro" >> /bootfs/cmdline.txt
+
+# Add option "ro" in /etc/fstab
+sed -i 's/^\S*\s\+\/[a-z]*\s\+\S*\s\+/&ro,/' /rootfs/etc/fstab
